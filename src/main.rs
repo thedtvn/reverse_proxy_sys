@@ -57,7 +57,7 @@ async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper:
     return Ok(rt);
 }
 
-/// Hot Reload Config File
+/// Hot Reload Config File.
 async fn hot_reload() {
     let mut old_config = tokio::fs::read_to_string(CONFIG_PATH).await.unwrap();
     loop {
