@@ -1,13 +1,13 @@
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Config {
+pub struct ConfigF {
     nodes: HashMap<String, Domain>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Domain {
     #[serde(rename = "taget")]
     taget: String,
