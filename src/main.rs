@@ -1,5 +1,6 @@
+mod yaml_obj;
+
 use tokio::sync::Mutex;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use hyper::body::Body;
 use tokio::net::TcpStream;
@@ -8,10 +9,17 @@ use hyper::upgrade::OnUpgrade;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Request, Response, StatusCode};
 use once_cell::sync::Lazy;
+use yaml_obj::Config;
 
+fn load_config() -> Config {
+    let file_data = std::fs::read_to_string("./config.yaml").unwrap();
+    let config:Config = serde_yaml::from_str(&file_data.as_str()).unwrap();
+    return config;
+}
 
-static _HASHMAP: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| {
-    let m = Mutex::new(HashMap::new());
+static _CONFIG: Lazy<Mutex<Config>> = Lazy::new(|| {
+    let config = load_config();
+    let m = Mutex::new(config);
     m
 });
 
@@ -49,6 +57,7 @@ async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper:
 #[tokio::main]
 async fn main() {
     let addr: SocketAddr = ([0, 0, 0, 0], 3001).into();
+    *_CONFIG.lock().await = load_config();
     let make_service = make_service_fn(|_conn| async {
         Ok::<_, hyper::Error>(service_fn(|req| async {
             server_upgrade(req).await
