@@ -1,3 +1,5 @@
+use tokio::sync::Mutex;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use hyper::body::Body;
 use tokio::net::TcpStream;
@@ -5,8 +7,13 @@ use hyper::Server;
 use hyper::upgrade::OnUpgrade;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Request, Response, StatusCode};
+use once_cell::sync::Lazy;
 
 
+static _HASHMAP: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| {
+    let m = Mutex::new(HashMap::new());
+    m
+});
 
 /// Our server HTTP handler to initiate HTTP upgrades.
 async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
@@ -41,12 +48,13 @@ async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper:
 
 #[tokio::main]
 async fn main() {
-    let addr: SocketAddr = ([127, 0, 0, 1], 3001).into();
+    let addr: SocketAddr = ([0, 0, 0, 0], 3001).into();
     let make_service = make_service_fn(|_conn| async {
-        Ok::<_, hyper::Error>(service_fn(server_upgrade))
+        Ok::<_, hyper::Error>(service_fn(|req| async {
+            server_upgrade(req).await
+        }))
     });
 
-    // Then bind and serve...
     let server = Server::bind(&addr).serve(make_service);
 
     println!("Listening on http://{}", addr);
