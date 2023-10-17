@@ -30,7 +30,6 @@ static CONFIG: Lazy<Mutex<ConfigF>> = Lazy::new(|| {
 
 /// Our server HTTP handler to initiate HTTP upgrades.
 async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    print!("OK");
     let hnr = &req.headers().get("Host");
     if hnr.is_none() {
         let mut rt = Response::new(Body::from("Host is required"));
@@ -98,6 +97,12 @@ async fn hot_reload() {
     }
 }
 
+async fn shutdown_signal() {
+    // Wait for the CTRL+C signal
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install CTRL+C signal handler");
+}
 
 #[tokio::main]
 async fn main() {
@@ -115,5 +120,10 @@ async fn main() {
 
     println!("Listening on http://{}", addr);
 
-    server.await.unwrap();
+    let graceful = server.with_graceful_shutdown(shutdown_signal());
+
+    // Run this server for... forever!
+    if let Err(e) = graceful.await {
+        eprintln!("server error: {}", e);
+    }
 }
