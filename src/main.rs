@@ -1,6 +1,7 @@
 mod yaml_obj;
 
 use tokio::sync::Mutex;
+use std::convert::Infallible;
 use tokio::time::{sleep, Duration};
 use std::net::SocketAddr;
 use hyper::body::Body;
@@ -10,7 +11,8 @@ use hyper::upgrade::OnUpgrade;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Request, Response, StatusCode};
 use once_cell::sync::Lazy;
-use yaml_obj::ConfigF;
+use yaml_obj::{ConfigF, Domain};
+use wildmatch::WildMatch;
 
 static CONFIG_PATH: &str = "./config.yaml";
 
@@ -28,8 +30,28 @@ static CONFIG: Lazy<Mutex<ConfigF>> = Lazy::new(|| {
 
 /// Our server HTTP handler to initiate HTTP upgrades.
 async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    println!("{:?}", CONFIG.lock().await);
-    let addr = "localhost:8080";
+    print!("OK");
+    let hnr = &req.headers().get("Host");
+    if hnr.is_none() {
+        let mut rt = Response::new(Body::from("Host is required"));
+        *rt.status_mut() = StatusCode::BAD_REQUEST;
+        return Ok(rt); 
+    }
+    let host = hnr.unwrap().to_str().unwrap();
+    let mut domain_config: &Domain = &Domain { taget: "".to_string(), ipcheck: None };
+    let domain_list = &CONFIG.lock().await.domains;
+    for i in domain_list {
+        if WildMatch::new(i.0.as_str()).matches(host) {
+            let fdomain = i.1.clone();
+            domain_config = fdomain;
+        }
+    }
+    if domain_config.taget.is_empty() {
+        let mut rt = Response::new(Body::empty());
+        *rt.status_mut() = StatusCode::BAD_GATEWAY;
+        return Ok(rt); 
+    }
+    let addr = domain_config.taget.clone();
     let client_stream = TcpStream::connect(addr).await;
     if client_stream.is_err() {
         let mut rt = Response::new(Body::from("Gateway error"));
@@ -57,6 +79,7 @@ async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper:
     return Ok(rt);
 }
 
+
 /// Hot Reload Config File.
 async fn hot_reload() {
     let mut old_config = tokio::fs::read_to_string(CONFIG_PATH).await.unwrap();
@@ -71,7 +94,7 @@ async fn hot_reload() {
             }
     
         }
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_secs(10)).await;
     }
 }
 
@@ -84,9 +107,8 @@ async fn main() {
     tokio::spawn(hot_reload());
 
     let make_service = make_service_fn(|_conn| async {
-        Ok::<_, hyper::Error>(service_fn(|req| async {
-            server_upgrade(req).await
-        }))
+        // service_fn converts our function into a `Service`
+        Ok::<_, Infallible>(service_fn(server_upgrade))
     });
 
     let server = Server::bind(&addr).serve(make_service);
