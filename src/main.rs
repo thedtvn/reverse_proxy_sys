@@ -37,17 +37,30 @@ fn check_config_value(var: String, value: String) -> bool {
         return false;
     }
     let mut return_var: bool = false;
-    let mode = split_var.remove(0);
+    let mode = split_var.remove(0).to_ascii_lowercase();
     let var = split_var.remove(0);
     if mode == "eq" || mode == "!eq" {
+
         return_var = var == value;
+
     } else if mode == "sw" || mode == "!sw" {
+
         return_var = value.starts_with(&var);
+
+    } else if mode == "ct" || mode == "!ct" {
+
+        return_var = value.contains(&var);
+
     } else if mode == "ew" || mode == "!ew" {
+
         return_var = value.ends_with(&var);
+
     } else if mode == "wc" || mode == "!wc" {
+
         return_var =  WildMatch::new(var).matches(value.as_str());
+
     } else if mode == "regex" || mode == "!regex" {
+
         let reg = Regex::new(var);
         if reg.is_ok() {
             return_var =  reg.unwrap().is_match(value.as_str());
@@ -55,6 +68,7 @@ fn check_config_value(var: String, value: String) -> bool {
             println!("Invalid Regex `{}`", var);
             return_var = false;
         }
+        
     }
     if mode.starts_with("!") {
         return_var = !return_var;

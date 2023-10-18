@@ -6,4 +6,5 @@ regex .*:
 # eq == equal
 # sw == startwith
 # ew == endwith
+# ct == contains
 # ! == not
