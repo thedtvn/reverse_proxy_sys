@@ -18,4 +18,3 @@ serde_yaml = "0.9"
 wildmatch = "2.1.1"
 regex = "1.10.2"
 reqwest = { version = "0.11", features = ["json"] }
-# https://docs.rs/ratelimit/latest/ratelimit/

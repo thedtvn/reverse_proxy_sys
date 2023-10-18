@@ -2,10 +2,8 @@ mod yaml_obj;
 
 use reqwest::Url;
 use tokio::sync::Mutex;
-use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio::time::{sleep, Duration};
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::net::SocketAddr;
 use hyper::server::conn::AddrStream;
 use hyper::body::Body;
@@ -15,7 +13,7 @@ use hyper::upgrade::OnUpgrade;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Request, Response, StatusCode};
 use once_cell::sync::Lazy;
-use yaml_obj::{ConfigF, Domain, ProxyInfo, CacheItem};
+use yaml_obj::{ConfigF, Domain};
 use wildmatch::WildMatch;
 use regex::Regex;
 
@@ -27,10 +25,7 @@ fn load_config() -> Result<ConfigF, ()> {
     return Ok(config);
 }
 
-static PROXY_CACHE: Lazy<Mutex<HashMap<String, CacheItem<bool>>>> = Lazy::new(|| {
-    let m = HashMap::new();
-    Mutex::new(m)
-});
+
 
 
 static CONFIG: Lazy<Mutex<ConfigF>> = Lazy::new(|| {
@@ -39,6 +34,12 @@ static CONFIG: Lazy<Mutex<ConfigF>> = Lazy::new(|| {
     m
 });
 
+/* 
+
+static RATELIMIT: Lazy<Mutex<HashMap<String, Ratelimiter>>> = Lazy::new(|| {
+    let m = HashMap::new();
+    Mutex::new(m)
+});
 
 fn unixtime_now() -> i32 {
     let start = SystemTime::now();
@@ -48,55 +49,26 @@ fn unixtime_now() -> i32 {
     return since_the_epoch.as_secs() as i32;
 }
 
-
-async fn set_proxy_cache(key: String, value: bool, expires: i32) {
-    let expier = unixtime_now() + expires;
-    PROXY_CACHE.lock().await.insert(key, CacheItem { value: value, expier: expier, default_expires: expires });
-}
-
-async fn get_proxy_cache(key: String) -> Option<bool> {
-    let key_lock = PROXY_CACHE.lock().await;
+async fn get_proxy_cache(key: String, token: i32, time: i32) -> Ratelimiter {
+    let key_lock = RATELIMIT.lock().await;
     let val = key_lock.get(key.as_str());
     if val.is_none() {
-        return None;
+        return a;
     }
-    let data = val.unwrap();
-    tokio::spawn(set_proxy_cache(key, data.value, data.default_expires));
-    return Some(data.value);
+    return val.unwrap();
 }
 
-async fn proxy_check(ip: &str) -> bool {
-    let mut out = false;
-    let caher = get_proxy_cache(ip.to_string()).await;
-    if caher.is_some() {
-        return caher.unwrap();
-    }
-    let body = reqwest::get(format!("https://proxycheck.io/v2/{}?risk=2&vpn=3", ip)).await;
-    if body.is_err() { 
-        tokio::spawn(set_proxy_cache(ip.to_string(), out, 60));
-        return out;
-    }
-    let body = body.unwrap();
-    let json = body.json::<ProxyInfo>().await;
-    if json.is_err() { 
-        tokio::spawn(set_proxy_cache(ip.to_string(), out, 60));
-        return out;
-    }
-    let json = json.unwrap();
-    if json.status != "ok" { return out; }
-    let data = json.server.get(ip).unwrap();
-    if data.proxy == "yes" { out = true }
-    if data.vpn == "yes" { 
-        if data.risk <= 33{
-            out = false
+async fn clear_cache() {
+    loop {
+        let check_time = unixtime_now();
+        for i in RATELIMIT.lock().await.iter() {
+            break;
         }
+        sleep(Duration::from_secs(30)).await;
     }
-    if data.risk > 66 {
-        out = true  
-    }
-    tokio::spawn(set_proxy_cache(ip.to_string(), out, 60));
-    return out;
 }
+*/
+
 
 /// Check Configuration Matches
 fn check_config_value(var: String, value: String) -> bool {
@@ -164,13 +136,7 @@ async fn get_ip_address(req: hyper::HeaderMap, addr_stream: SocketAddr) -> Strin
 
 /// Our server HTTP handler to initiate HTTP upgrades.
 async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Result<Response<Body>, hyper::Error> {
-    let ipadd = get_ip_address(req.headers().clone(), addr_stream).await;
-    if proxy_check(ipadd.as_str()).await {
-        println!("Blocked {}", ipadd.to_string());
-        let mut rt = Response::new(Body::from("Your IP address is on blacklisted."));
-        *rt.status_mut() = StatusCode::FORBIDDEN;
-        return Ok(rt); 
-    }
+    let _ipadd = get_ip_address(req.headers().clone(), addr_stream).await;
     let hnr = &req.headers().get("Host");
     if hnr.is_none() {
         let mut rt = Response::new(Body::empty());
@@ -238,17 +204,6 @@ async fn hot_reload() {
     }
 }
 
-async fn clear_cache() {
-    loop {
-        let check_time = unixtime_now();
-        for i in PROXY_CACHE.lock().await.iter() {
-            if i.1.expier <= check_time {
-                PROXY_CACHE.lock().await.remove(i.0.as_str());
-            }
-        }
-        sleep(Duration::from_secs(30)).await;
-    }
-}
 
 /// Wait for the CTRL+C signal
 async fn shutdown_signal() {
@@ -263,7 +218,7 @@ async fn main() {
     *CONFIG.lock().await = load_config().unwrap();
     
     tokio::spawn(hot_reload());
-    tokio::spawn(clear_cache());
+    // tokio::spawn(clear_cache());
 
     let make_service =
     make_service_fn(move |conn: &AddrStream|{
