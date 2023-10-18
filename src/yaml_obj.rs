@@ -19,3 +19,23 @@ pub struct Domain {
     pub rate_limit: Option<Vec<i32>>,
 */
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ProxyInfo {
+    pub status: String,
+    #[serde(flatten)]
+    pub server: HashMap<String, Proxy>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Proxy {
+    pub vpn: String,
+    pub proxy: String,
+    pub risk: u32
+}
+
+pub struct CacheItem<T> {
+    pub value: T,
+    pub expier: i32,
+    pub default_expires: i32
+}
