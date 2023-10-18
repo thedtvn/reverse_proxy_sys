@@ -1,2 +1,9 @@
 regex .*:
   taget: 192.168.1.14:2000
+# type: regex, !regex, eq, !eq, sw, !sw, ew, !ew, wc, !wc
+# regex == just regex
+# wc == wildcard
+# eq == equal
+# sw == startwith
+# ew == endwith
+# ! == not
