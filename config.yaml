@@ -1,6 +1,4 @@
-regex .*:
-  taget: 192.168.1.14:2000
-# type: regex, !regex, eq, !eq, sw, !sw, ew, !ew, wc, !wc
+# type: regex, !regex, eq, !eq, sw, !sw, ew, !ew, wc, !wc, ct, !ct
 # regex == just regex
 # wc == wildcard
 # eq == equal
@@ -8,3 +6,12 @@ regex .*:
 # ew == endwith
 # ct == contains
 # ! == not
+
+################################
+#            format            #
+################################
+# {type} {variable}:
+#   taget: {host}:{port}
+
+regex .*:
+  taget: 192.168.1.14:2000

@@ -12,6 +12,6 @@ pub struct Domain {
     #[serde(rename = "taget")]
     pub taget: String,
 
-    #[serde(rename = "ipcheck")]
-    pub ipcheck: Option<bool>,
+/*    #[serde(rename = "ipcheck")]
+    pub ipcheck: Option<bool>,*/
 }
