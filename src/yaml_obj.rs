@@ -11,7 +11,11 @@ pub struct ConfigF {
 pub struct Domain {
     #[serde(rename = "taget")]
     pub taget: String,
+/*
+    #[serde(rename = "ip_proxy")]
+    pub ip_proxy: Option<bool>,
 
-/*    #[serde(rename = "ipcheck")]
-    pub ipcheck: Option<bool>,*/
+    #[serde(rename = "rate_limit")]
+    pub rate_limit: Option<Vec<i32>>,
+*/
 }
