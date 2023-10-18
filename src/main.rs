@@ -13,6 +13,7 @@ use hyper::{Request, Response, StatusCode};
 use once_cell::sync::Lazy;
 use yaml_obj::{ConfigF, Domain};
 use wildmatch::WildMatch;
+use regex::Regex;
 
 static CONFIG_PATH: &str = "./config.yaml";
 
@@ -28,24 +29,57 @@ static CONFIG: Lazy<Mutex<ConfigF>> = Lazy::new(|| {
     m
 });
 
+fn check_config_value(var: String, value: String) -> bool {
+    let mut split_var = var.split(" ").collect::<Vec<&str>>();
+    if (split_var.len() as i32) < 2 {
+        println!("Invalid `{}`", var);
+        return false;
+    }
+    let mut return_var: bool = false;
+    let mode = split_var.remove(0);
+    let var = split_var.remove(0);
+    if mode == "eq" || mode == "!eq" {
+        return_var = var == value;
+    } else if mode == "sw" || mode == "!sw" {
+        return_var = value.starts_with(&var);
+    } else if mode == "ew" || mode == "!ew" {
+        return_var = value.ends_with(&var);
+    } else if mode == "wc" || mode == "!wc" {
+        return_var =  WildMatch::new(var).matches(value.as_str());
+    } else if mode == "regex" || mode == "!regex" {
+        let reg = Regex::new(var);
+        if reg.is_ok() {
+            return_var =  reg.unwrap().is_match(value.as_str());
+        } else {
+            println!("Invalid Regex `{}`", var);
+            return_var = false;
+        }
+    }
+    if mode.starts_with("!") {
+        return_var = !return_var;
+    }
+    return return_var;
+}
+
 /// Our server HTTP handler to initiate HTTP upgrades.
 async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     let hnr = &req.headers().get("Host");
     if hnr.is_none() {
-        let mut rt = Response::new(Body::from("Host is required"));
+        let mut rt = Response::new(Body::empty());
         *rt.status_mut() = StatusCode::BAD_REQUEST;
         return Ok(rt); 
     }
     let host = hnr.unwrap().to_str().unwrap();
-    let mut domain_config: &Domain = &Domain { taget: "".to_string(), ipcheck: None };
+    let mut domain_config: &Domain = &Domain::default();
     let domain_list = &CONFIG.lock().await.domains;
     for i in domain_list {
-        if WildMatch::new(i.0.as_str()).matches(host) {
+        if check_config_value(i.0.to_string(), host.to_string()) {
             let fdomain = i.1.clone();
             domain_config = fdomain;
+            break;
         }
     }
-    if domain_config.taget.is_empty() {
+    if domain_config == &Domain::default() {
         let mut rt = Response::new(Body::empty());
         *rt.status_mut() = StatusCode::BAD_GATEWAY;
         return Ok(rt); 
