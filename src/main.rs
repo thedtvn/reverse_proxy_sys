@@ -29,6 +29,7 @@ static CONFIG: Lazy<Mutex<ConfigF>> = Lazy::new(|| {
     m
 });
 
+/// Check Configuration Matches
 fn check_config_value(var: String, value: String) -> bool {
     let mut split_var = var.split(" ").collect::<Vec<&str>>();
     if (split_var.len() as i32) < 2 {
@@ -60,6 +61,8 @@ fn check_config_value(var: String, value: String) -> bool {
     }
     return return_var;
 }
+
+
 
 /// Our server HTTP handler to initiate HTTP upgrades.
 async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
@@ -112,7 +115,6 @@ async fn server_upgrade(mut req: Request<Body>) -> Result<Response<Body>, hyper:
     return Ok(rt);
 }
 
-
 /// Hot Reload Config File.
 async fn hot_reload() {
     let mut old_config = tokio::fs::read_to_string(CONFIG_PATH).await.unwrap();
@@ -131,8 +133,9 @@ async fn hot_reload() {
     }
 }
 
+
+/// Wait for the CTRL+C signal
 async fn shutdown_signal() {
-    // Wait for the CTRL+C signal
     tokio::signal::ctrl_c()
         .await
         .expect("failed to install CTRL+C signal handler");
