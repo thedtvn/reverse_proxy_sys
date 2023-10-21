@@ -12,7 +12,27 @@
 ################################
 # {type} {variable}:
 #   taget: {host}:{port}
+#   rate_limit: # optional
+#     per: hrs / min / sec
+#     limit: 10
+#     burst: 10 # optional
 
-regex .*:
-  taget: 192.168.1.14:2000
-  rate_limit: 10/s
+# proxy will search from top to bottom and will priority top then bottom 
+
+# example
+regex \d+.example.com: # it will match all example.com subdomains that has only nunber
+  taget: localhost:2000
+  rate_limit:
+    per: hrs
+    limit: 10
+    burst: 10
+
+# example
+wc hi-*.example.com: # it will match all example.com subdomains start with "hi-"
+  taget: localhost:3000
+  rate_limit:
+    per: sec
+    limit: 10
+
+eq example.com: # it will equal to example.com only
+  taget: localhost:3000

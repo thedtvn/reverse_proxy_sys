@@ -7,6 +7,7 @@ use reqwest::Url;
 use tokio::sync::Mutex;
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use hyper::server::conn::AddrStream;
 use hyper::body::Body;
 use tokio::net::TcpStream;
@@ -22,10 +23,11 @@ use governor::clock::SystemClock;
 use governor::middleware::NoOpMiddleware;
 use governor::state::InMemoryState;
 use std::time::SystemTime;
-use std::num::NonZeroU32;
 use dashmap::DashMap;
 
+// edit this for your own config path
 static CONFIG_PATH: &str = "./config.yaml";
+static BIND_ADDR: &str = "0.0.0.0:3001";
 
 fn load_config() -> Result<ConfigF, ()> {
     let file_data = std::fs::read_to_string(CONFIG_PATH).unwrap();
@@ -36,26 +38,26 @@ fn load_config() -> Result<ConfigF, ()> {
 
 fn updated_ratelimit(config: &ConfigF) {
     for i in config.domains.iter() {
-        let config_ratelimit = i.1.rate_limit.clone();
+        let config_ratelimit = i.1.rate_limit.as_ref();
         if config_ratelimit.is_none() { continue; }
         let r_cf = config_ratelimit.unwrap();
-        let config_ratelimit = r_cf.split("/").collect::<Vec<&str>>();
-        let str_limit = config_ratelimit.get(0).unwrap().parse::<u32>().unwrap();
-        let str_mode = config_ratelimit.get(1).unwrap().to_ascii_lowercase();
-        let limit = NonZeroU32::new(str_limit).unwrap();
-        let turn = NonZeroU32::new(1).unwrap();
-        let quota: Quota;
-        if str_mode == "s" {
-            quota = Quota::per_second(turn);
-        } else if  str_mode == "m" {
-            quota = Quota::per_minute(turn);
-        } else if  str_mode == "h" {
-            quota = Quota::per_minute(turn);
+        let str_mode = &r_cf.per;
+        let limit = r_cf.limit;
+        let mut quota: Quota;
+        if str_mode == "sec" {
+            quota = Quota::per_second(limit);
+        } else if  str_mode == "min" {
+            quota = Quota::per_minute(limit);
+        } else if  str_mode == "hrs" {
+            quota = Quota::per_minute(limit);
         } else {
             panic!("Mode '{}' is Invalid", str_mode);
         }
-        let fquota = quota.allow_burst(limit);
-        let rlm: RateLimiter<String, DashMap<String, InMemoryState>, SystemClock, NoOpMiddleware<SystemTime>> = RateLimiter::dashmap_with_clock(fquota, &SystemClock::default());
+        let bt_m = r_cf.burst;
+        if bt_m.is_some() {
+            quota = quota.allow_burst(bt_m.unwrap());
+        }
+        let rlm: RateLimiter<String, DashMap<String, InMemoryState>, SystemClock, NoOpMiddleware<SystemTime>> = RateLimiter::dashmap_with_clock(quota, &SystemClock::default());
         CONFIG_RATELIMIT.insert(i.0.to_string(), rlm);
     }
 }
@@ -71,41 +73,6 @@ lazy_static! {
         m
     };
 }
-
-/* 
-
-static RATELIMIT: Lazy<Mutex<HashMap<String, Ratelimiter>>> = Lazy::new(|| {
-    let m = HashMap::new();
-    Mutex::new(m)
-});
-
-fn unixtime_now() -> i32 {
-    let start = SystemTime::now();
-    let since_the_epoch = start
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    return since_the_epoch.as_secs() as i32;
-}
-
-async fn get_proxy_cache(key: String, token: i32, time: i32) -> Ratelimiter {
-    let key_lock = RATELIMIT.lock().await;
-    let val = key_lock.get(key.as_str());
-    if val.is_none() {
-        return a;
-    }
-    return val.unwrap();
-}
-
-async fn clear_cache() {
-    loop {
-        let check_time = unixtime_now();
-        for i in RATELIMIT.lock().await.iter() {
-            break;
-        }
-        sleep(Duration::from_secs(30)).await;
-    }
-}
-*/
 
 
 /// Check Configuration Matches
@@ -193,7 +160,7 @@ async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Resu
             break;
         }
     }
-    if domain_config == &Domain::default() {
+    if domain_config.taget == Domain::default().taget {
         let mut rt = Response::new(Body::empty());
         *rt.status_mut() = StatusCode::BAD_GATEWAY;
         return Ok(rt); 
@@ -243,7 +210,7 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() {
-    let addr: SocketAddr = ([0, 0, 0, 0], 3001).into();
+    let addr: SocketAddr = SocketAddr::from_str(BIND_ADDR).unwrap();
 
     *CONFIG.lock().await = load_config().unwrap();
 
