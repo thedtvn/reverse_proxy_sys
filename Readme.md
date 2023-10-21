@@ -13,5 +13,3 @@ edit key [BIND_ADDR](https://github.com/thedtvn/reverse_proxy_sys/blob/main/src/
 edit key [CONFIG_PATH](https://github.com/thedtvn/reverse_proxy_sys/blob/main/src/main.rs#L29) at main.rs
 
 Project by [thedtvn](https://github.com/thedtvn)
-
-open p
