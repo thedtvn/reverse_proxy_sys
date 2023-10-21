@@ -23,9 +23,9 @@
 regex \d+.example.com: # it will match all example.com subdomains that has only nunber
   taget: localhost:2000
   rate_limit:
-    per: hrs
-    limit: 10
-    burst: 10
+    per: min
+    limit: 600
+    burst: 60
 
 # example
 wc hi-*.example.com: # it will match all example.com subdomains start with "hi-"
