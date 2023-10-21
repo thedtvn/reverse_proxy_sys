@@ -1,9 +1,11 @@
-mod yaml_obj;
+mod obj;
+
+#[macro_use]
+extern crate lazy_static;
 
 use reqwest::Url;
 use tokio::sync::Mutex;
 use std::convert::Infallible;
-use tokio::time::{sleep, Duration};
 use std::net::SocketAddr;
 use hyper::server::conn::AddrStream;
 use hyper::body::Body;
@@ -12,27 +14,63 @@ use hyper::Server;
 use hyper::upgrade::OnUpgrade;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Request, Response, StatusCode};
-use once_cell::sync::Lazy;
-use yaml_obj::{ConfigF, Domain};
+use obj::{ConfigF, Domain};
 use wildmatch::WildMatch;
 use regex::Regex;
+use governor::{RateLimiter, Quota};
+use governor::clock::SystemClock;
+use governor::middleware::NoOpMiddleware;
+use governor::state::InMemoryState;
+use std::time::SystemTime;
+use std::num::NonZeroU32;
+use dashmap::DashMap;
 
 static CONFIG_PATH: &str = "./config.yaml";
 
 fn load_config() -> Result<ConfigF, ()> {
     let file_data = std::fs::read_to_string(CONFIG_PATH).unwrap();
     let config:ConfigF = serde_yaml::from_str(&file_data.as_str()).unwrap();
+    updated_ratelimit(&config);
     return Ok(config);
 }
 
+fn updated_ratelimit(config: &ConfigF) {
+    for i in config.domains.iter() {
+        let config_ratelimit = i.1.rate_limit.clone();
+        if config_ratelimit.is_none() { continue; }
+        let r_cf = config_ratelimit.unwrap();
+        let config_ratelimit = r_cf.split("/").collect::<Vec<&str>>();
+        let str_limit = config_ratelimit.get(0).unwrap().parse::<u32>().unwrap();
+        let str_mode = config_ratelimit.get(1).unwrap().to_ascii_lowercase();
+        let limit = NonZeroU32::new(str_limit).unwrap();
+        let turn = NonZeroU32::new(1).unwrap();
+        let quota: Quota;
+        if str_mode == "s" {
+            quota = Quota::per_second(turn);
+        } else if  str_mode == "m" {
+            quota = Quota::per_minute(turn);
+        } else if  str_mode == "h" {
+            quota = Quota::per_minute(turn);
+        } else {
+            panic!("Mode '{}' is Invalid", str_mode);
+        }
+        let fquota = quota.allow_burst(limit);
+        let rlm: RateLimiter<String, DashMap<String, InMemoryState>, SystemClock, NoOpMiddleware<SystemTime>> = RateLimiter::dashmap_with_clock(fquota, &SystemClock::default());
+        CONFIG_RATELIMIT.insert(i.0.to_string(), rlm);
+    }
+}
 
-
-
-static CONFIG: Lazy<Mutex<ConfigF>> = Lazy::new(|| {
-    let config:ConfigF = load_config().unwrap();
-    let m = Mutex::new(config);
-    m
-});
+lazy_static! {
+    static ref CONFIG: Mutex<ConfigF> = {
+        let config:ConfigF = load_config().unwrap();
+        let m = Mutex::new(config);
+        m
+    };
+    static ref CONFIG_RATELIMIT: DashMap<String, RateLimiter<String, DashMap<String, InMemoryState>, SystemClock, NoOpMiddleware<SystemTime>>> = {
+        let m = DashMap::new();
+        m
+    };
+}
 
 /* 
 
@@ -136,7 +174,7 @@ async fn get_ip_address(req: hyper::HeaderMap, addr_stream: SocketAddr) -> Strin
 
 /// Our server HTTP handler to initiate HTTP upgrades.
 async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Result<Response<Body>, hyper::Error> {
-    let _ipadd = get_ip_address(req.headers().clone(), addr_stream).await;
+    let ipadd = get_ip_address(req.headers().clone(), addr_stream).await;
     let hnr = &req.headers().get("Host");
     if hnr.is_none() {
         let mut rt = Response::new(Body::empty());
@@ -145,17 +183,26 @@ async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Resu
     }
     let host = hnr.unwrap().to_str().unwrap();
     let mut domain_config: &Domain = &Domain::default();
+    let mut domain_key: String = "".to_string();
     let domain_list = &CONFIG.lock().await.domains;
     for i in domain_list {
         if check_config_value(i.0.to_string(), host.to_string()) {
             let fdomain = i.1.clone();
             domain_config = fdomain;
+            domain_key = i.0.to_string();
             break;
         }
     }
     if domain_config == &Domain::default() {
         let mut rt = Response::new(Body::empty());
         *rt.status_mut() = StatusCode::BAD_GATEWAY;
+        return Ok(rt); 
+    }
+    let out = CONFIG_RATELIMIT.get(&domain_key).unwrap().check_key(&format!("{}|{}", host, ipadd));
+    if out.is_err() {
+        println!("Ratelimit {}", ipadd);
+        let mut rt = Response::new(Body::empty());
+        *rt.status_mut() = StatusCode::TOO_MANY_REQUESTS;
         return Ok(rt); 
     }
     let addr = domain_config.taget.clone();
@@ -186,24 +233,6 @@ async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Resu
     return Ok(rt);
 }
 
-/// Hot Reload Config File.
-async fn hot_reload() {
-    let mut old_config = tokio::fs::read_to_string(CONFIG_PATH).await.unwrap();
-    loop {
-        let new_config = tokio::fs::read_to_string(CONFIG_PATH).await.unwrap();
-        if old_config != new_config {
-            let config:serde_yaml::Result<ConfigF> = serde_yaml::from_str(&new_config.as_str());
-            if config.is_ok() {
-                *CONFIG.lock().await = config.unwrap();
-                old_config = new_config;
-                println!("Config updated");
-            }
-    
-        }
-        sleep(Duration::from_secs(10)).await;
-    }
-}
-
 
 /// Wait for the CTRL+C signal
 async fn shutdown_signal() {
@@ -215,10 +244,8 @@ async fn shutdown_signal() {
 #[tokio::main]
 async fn main() {
     let addr: SocketAddr = ([0, 0, 0, 0], 3001).into();
+
     *CONFIG.lock().await = load_config().unwrap();
-    
-    tokio::spawn(hot_reload());
-    // tokio::spawn(clear_cache());
 
     let make_service =
     make_service_fn(move |conn: &AddrStream|{
