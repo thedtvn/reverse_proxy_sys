@@ -5,9 +5,11 @@
 ## how to use
 
 **you just need to edit config file and put it in dir were you run this application** 
+
 here is a example configuration file [config.yml](https://github.com/thedtvn/reverse_proxy_sys/blob/main/config.yaml)
 
 **and you want to edit configuration file located**
+
 edit key [CONFIG_PATH](https://github.com/thedtvn/reverse_proxy_sys/blob/main/src/main.rs#L29) at main.rs
 
 
