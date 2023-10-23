@@ -19,7 +19,14 @@
 
 # proxy will search from top to bottom and will priority top then bottom 
 
-# example
+# example configuration
+
+################################
+
+# bind: {host}:{port}
+# like `bind: 0.0.0.0:80` or `bind: localhost:80`
+bind: localhost:80
+
 regex \d+.example.com: # it will match all example.com subdomains that has only nunber
   taget: localhost:2000
   rate_limit:

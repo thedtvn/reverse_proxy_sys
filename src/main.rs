@@ -6,8 +6,7 @@ extern crate lazy_static;
 use reqwest::Url;
 use tokio::sync::Mutex;
 use std::convert::Infallible;
-use std::net::SocketAddr;
-use std::str::FromStr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use hyper::server::conn::AddrStream;
 use hyper::body::Body;
 use tokio::net::TcpStream;
@@ -27,7 +26,6 @@ use dashmap::DashMap;
 
 // edit this for your own config path
 static CONFIG_PATH: &str = "./config.yaml";
-static BIND_ADDR: &str = "0.0.0.0:3001";
 
 fn load_config() -> Result<ConfigF, ()> {
     let file_data = std::fs::read_to_string(CONFIG_PATH).unwrap();
@@ -210,10 +208,14 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() {
-    let addr: SocketAddr = SocketAddr::from_str(BIND_ADDR).unwrap();
+    
 
     *CONFIG.lock().await = load_config().unwrap();
-
+    let addrs_iter = CONFIG.lock().await.bind.to_socket_addrs();
+    if addrs_iter.is_err() {
+        panic!("{}", addrs_iter.unwrap_err());
+    }
+    let addr = addrs_iter.unwrap().next().unwrap();
     let make_service =
     make_service_fn(move |conn: &AddrStream|{
         let addr = conn.remote_addr();

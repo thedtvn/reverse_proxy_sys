@@ -3,8 +3,9 @@ use std::num::NonZeroU32;
 use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-#[serde(transparent)]
 pub struct ConfigF {
+    pub bind: String,
+    #[serde(flatten)]
     pub domains: HashMap<String, Domain>,
 }
 
