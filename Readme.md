@@ -10,7 +10,7 @@ here is a example configuration file [config.yml](https://github.com/thedtvn/rev
 
 **and you want to edit configuration file located**
 
-edit key [CONFIG_PATH](https://github.com/thedtvn/reverse_proxy_sys/blob/main/src/main.rs#L29) at main.rs
+edit key [CONFIG_PATH](https://github.com/thedtvn/reverse_proxy_sys/blob/main/src/main.rs#L28) at main.rs
 
 
 #### Project by [thedtvn](https://github.com/thedtvn)
