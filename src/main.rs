@@ -3,7 +3,7 @@ mod obj;
 #[macro_use]
 extern crate lazy_static;
 
-use reqwest::Url;
+use url::Url;
 use tokio::sync::Mutex;
 use std::convert::Infallible;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -163,12 +163,15 @@ async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Resu
         *rt.status_mut() = StatusCode::BAD_GATEWAY;
         return Ok(rt); 
     }
-    let out = CONFIG_RATELIMIT.get(&domain_key).unwrap().check_key(&format!("{}|{}", host, ipadd));
-    if out.is_err() {
-        println!("Ratelimit {}", ipadd);
-        let mut rt = Response::new(Body::empty());
-        *rt.status_mut() = StatusCode::TOO_MANY_REQUESTS;
-        return Ok(rt); 
+    let ratelimitkey = CONFIG_RATELIMIT.get(&domain_key);
+    if ratelimitkey.is_some() {
+        let out = ratelimitkey.unwrap().check_key(&format!("{}|{}", host, ipadd));
+        if out.is_err() {
+            println!("Ratelimit {}", ipadd);
+            let mut rt = Response::new(Body::empty());
+            *rt.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+            return Ok(rt); 
+        }
     }
     let addr = domain_config.taget.clone();
     let client_stream = TcpStream::connect(addr).await;
