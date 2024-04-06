@@ -2,11 +2,17 @@ mod obj;
 
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]                                                                                         
+extern crate dlopen_derive;                                                                          
 
+use clap::Parser;
+use dlopen::wrapper::{Container, WrapperApi};
 use url::Url;
 use tokio::sync::Mutex;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::path::PathBuf;
 use hyper::server::conn::AddrStream;
 use hyper::body::Body;
 use tokio::net::TcpStream;
@@ -17,47 +23,36 @@ use hyper::{Request, Response, StatusCode};
 use obj::{ConfigF, Domain};
 use wildmatch::WildMatch;
 use regex::Regex;
-use governor::{RateLimiter, Quota};
-use governor::clock::SystemClock;
-use governor::middleware::NoOpMiddleware;
-use governor::state::InMemoryState;
-use std::time::SystemTime;
-use dashmap::DashMap;
 
-// edit this for your own config path
-static CONFIG_PATH: &str = "./config.yaml";
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(short, long, value_name = "FILE", default_value = "config.yaml")]
+    config: PathBuf,
 
-fn load_config() -> Result<ConfigF, ()> {
-    let file_data = std::fs::read_to_string(CONFIG_PATH).unwrap();
-    let config:ConfigF = serde_yaml::from_str(&file_data.as_str()).unwrap();
-    updated_ratelimit(&config);
-    return Ok(config);
+    #[arg(short, long, value_name = "DIR", default_value = "plugins")]
+    plugins_dir: PathBuf,
 }
 
-fn updated_ratelimit(config: &ConfigF) {
-    for i in config.domains.iter() {
-        let config_ratelimit = i.1.rate_limit.as_ref();
-        if config_ratelimit.is_none() { continue; }
-        let r_cf = config_ratelimit.unwrap();
-        let str_mode = &r_cf.per;
-        let limit = r_cf.limit;
-        let mut quota: Quota;
-        if str_mode == "sec" {
-            quota = Quota::per_second(limit);
-        } else if  str_mode == "min" {
-            quota = Quota::per_minute(limit);
-        } else if  str_mode == "hrs" {
-            quota = Quota::per_minute(limit);
-        } else {
-            panic!("Mode '{}' is Invalid", str_mode);
-        }
-        let bt_m = r_cf.burst;
-        if bt_m.is_some() {
-            quota = quota.allow_burst(bt_m.unwrap());
-        }
-        let rlm: RateLimiter<String, DashMap<String, InMemoryState>, SystemClock, NoOpMiddleware<SystemTime>> = RateLimiter::dashmap_with_clock(quota, &SystemClock::default());
-        CONFIG_RATELIMIT.insert(i.0.to_string(), rlm);
+
+
+#[derive(WrapperApi)]
+struct Plugin {
+    on_request: fn(request: Request<Body>, addr: String, cache: HashMap<String, String>) -> (Request<Body>, HashMap<String, String>),
+    on_response: fn(request: Response<Body>, addr: String, cache: HashMap<String, String>) -> (Response<Body>, HashMap<String, String>)
+}
+
+fn load_config() -> Result<ConfigF, ()> {
+    if !&ARGS_CONFIG.config.is_file() {
+        println!("'{}' is not a config file", ARGS_CONFIG.config.display());
+        std::process::exit(1);
     }
+    let file_data = std::fs::read_to_string(&ARGS_CONFIG.config).unwrap();
+    let config:ConfigF = serde_yaml::from_str(&file_data.as_str()).unwrap_or_else(|_| {
+        println!("Failed to load config file '{}'", ARGS_CONFIG.config.display());
+        std::process::exit(1);
+    });
+    return Ok(config);
 }
 
 lazy_static! {
@@ -66,10 +61,8 @@ lazy_static! {
         let m = Mutex::new(config);
         m
     };
-    static ref CONFIG_RATELIMIT: DashMap<String, RateLimiter<String, DashMap<String, InMemoryState>, SystemClock, NoOpMiddleware<SystemTime>>> = {
-        let m = DashMap::new();
-        m
-    };
+    static ref ARGS_CONFIG: Args = Args::parse();
+    static ref PLUGINS: HashMap<String, Container<Plugin>> = load_plugins();
 }
 
 
@@ -136,6 +129,29 @@ async fn get_ip_address(req: hyper::HeaderMap, addr_stream: SocketAddr) -> Strin
     return out_ip;
 }
 
+fn load_plugins() -> HashMap<String, Container<Plugin>> {
+    let mut plugins = HashMap::new();
+    for file in std::fs::read_dir(&ARGS_CONFIG.plugins_dir).unwrap() {
+        let path = file.unwrap().path();
+        let os_name =  std::env::consts::OS;
+        let file_extension;
+        if os_name == "windows" {
+            file_extension = "dll";
+        } else if os_name == "macos" {
+            file_extension = "dylib";
+        } else if os_name == "linux" {
+            file_extension = "so";
+        } else {
+            file_extension = "";
+        }
+        if path.is_file() && path.extension().unwrap().to_str().unwrap() == file_extension {
+            let name = path.file_stem().unwrap().to_str().unwrap().to_string();
+            let plugin_api_wrapper: Container<Plugin> = unsafe { Container::load(path) }.unwrap();
+            plugins.insert(name, plugin_api_wrapper);
+        }
+    }
+    return plugins;
+}
 
 /// Our server HTTP handler to initiate HTTP upgrades.
 async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Result<Response<Body>, hyper::Error> {
@@ -147,33 +163,29 @@ async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Resu
         return Ok(rt); 
     }
     let host = hnr.unwrap().to_str().unwrap();
-    let mut domain_config: &Domain = &Domain::default();
-    let mut domain_key: String = "".to_string();
+    let mut domain_key = (&"".to_string(), &Domain::default());
     let domain_list = &CONFIG.lock().await.domains;
     for i in domain_list {
         if check_config_value(i.0.to_string(), host.to_string()) {
-            let fdomain = i.1.clone();
-            domain_config = fdomain;
-            domain_key = i.0.to_string();
+            domain_key = i;
             break;
         }
     }
-    if domain_config.taget == Domain::default().taget {
+    if domain_key.1.taget == Domain::default().taget {
         let mut rt = Response::new(Body::empty());
         *rt.status_mut() = StatusCode::BAD_GATEWAY;
         return Ok(rt); 
     }
-    let ratelimitkey = CONFIG_RATELIMIT.get(&domain_key);
-    if ratelimitkey.is_some() {
-        let out = ratelimitkey.unwrap().check_key(&format!("{}|{}", host, ipadd));
-        if out.is_err() {
-            println!("Ratelimit {}", ipadd);
-            let mut rt = Response::new(Body::empty());
-            *rt.status_mut() = StatusCode::TOO_MANY_REQUESTS;
-            return Ok(rt); 
+    let plugin_list = &domain_key.1.plugins.clone().unwrap_or(Vec::new());
+    let mut cache = HashMap::new();
+    println!("{} -> {}", ipadd, domain_key.1.taget);
+    for i in plugin_list {
+        if PLUGINS.contains_key(i) {
+            let plugin = PLUGINS.get(i).unwrap();
+            (req, cache) = plugin.on_request(req, ipadd.clone(), cache);
         }
     }
-    let addr = domain_config.taget.clone();
+    let addr = domain_key.1.taget.clone();
     let client_stream = TcpStream::connect(addr).await;
     if client_stream.is_err() {
         let mut rt = Response::new(Body::from("Gateway error"));
@@ -197,7 +209,13 @@ async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Resu
             let _ = tokio::io::copy_bidirectional(&mut _requp, &mut _retup).await;
         }); 
     }
-    let rt = Response::from_parts(parts, body);
+    let mut rt = Response::from_parts(parts, body);
+    for i in plugin_list {
+        if PLUGINS.contains_key(i) {
+            let plugin = PLUGINS.get(i).unwrap();
+            (rt, cache) = plugin.on_response(rt, ipadd.clone(), cache);
+        }
+    }
     return Ok(rt);
 }
 
@@ -211,8 +229,6 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() {
-    
-
     *CONFIG.lock().await = load_config().unwrap();
     let addrs_iter = CONFIG.lock().await.bind.to_socket_addrs();
     if addrs_iter.is_err() {

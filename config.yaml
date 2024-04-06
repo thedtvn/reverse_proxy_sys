@@ -12,10 +12,8 @@
 ################################
 # {type} {variable}:
 #   taget: {host}:{port}
-#   rate_limit: # optional
-#     per: hrs / min / sec
-#     limit: 10
-#     burst: 10 # optional
+#   plugins:
+#     - {plugin_name}
 
 # proxy will search from top to bottom and will priority top then bottom 
 
@@ -29,17 +27,12 @@ bind: localhost:80
 
 regex \d+.example.com: # it will match all example.com subdomains that has only nunber
   taget: localhost:2000
-  rate_limit:
-    per: min
-    limit: 600
-    burst: 60
+  plugins:
+    - reverse_proxy_sys_plugin_example
 
 # example
 wc hi-*.example.com: # it will match all example.com subdomains start with "hi-"
   taget: localhost:3000
-  rate_limit:
-    per: sec
-    limit: 10
 
 eq example.com: # it will equal to example.com only
   taget: localhost:3000
