@@ -20,7 +20,7 @@ use hyper::Server;
 use hyper::upgrade::OnUpgrade;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Request, Response, StatusCode};
-use obj::{ConfigF, Domain};
+use obj::{ConfigF, ResponsePlugin, RequestPlugin};
 use wildmatch::WildMatch;
 use regex::Regex;
 
@@ -38,8 +38,8 @@ struct Args {
 
 #[derive(WrapperApi)]
 struct Plugin {
-    on_request: fn(request: Request<Body>, addr: String, cache: HashMap<String, String>) -> (Request<Body>, HashMap<String, String>),
-    on_response: fn(request: Response<Body>, addr: String, cache: HashMap<String, String>) -> (Response<Body>, HashMap<String, String>)
+    on_request: fn(request: &mut RequestPlugin) -> (),
+    on_response: fn(response: &mut ResponsePlugin) -> ()
 }
 
 fn load_config() -> Result<ConfigF, ()> {
@@ -118,13 +118,12 @@ async fn get_ip_address(req: hyper::HeaderMap, addr_stream: SocketAddr) -> Strin
     let mut out_ip = add_h.host_str().unwrap().to_string();
     let cf_header = req.get("CF-Connecting-IP");
     let forward = req.get("X-Forwarded-For");
-    if forward.is_some() {
+    if cf_header.is_some() {
+        out_ip = cf_header.unwrap().to_str().unwrap().to_string()
+    }else if forward.is_some() {
         let mut list_ip = forward.unwrap().to_str().unwrap().to_string();
         list_ip = list_ip.replace(" ", "");
         out_ip = list_ip.split(",").next().unwrap_or(out_ip.as_str()).to_string();
-    }
-    if cf_header.is_some() {
-        out_ip = cf_header.unwrap().to_str().unwrap().to_string()
     }
     return out_ip;
 }
@@ -154,7 +153,7 @@ fn load_plugins() -> HashMap<String, Container<Plugin>> {
 }
 
 /// Our server HTTP handler to initiate HTTP upgrades.
-async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Result<Response<Body>, hyper::Error> {
+async fn server_upgrade(req: Request<Body>, addr_stream: SocketAddr) -> Result<Response<Body>, hyper::Error> {
     let ipadd = get_ip_address(req.headers().clone(), addr_stream).await;
     let hnr = &req.headers().get("Host");
     if hnr.is_none() {
@@ -163,29 +162,30 @@ async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Resu
         return Ok(rt); 
     }
     let host = hnr.unwrap().to_str().unwrap();
-    let mut domain_key = (&"".to_string(), &Domain::default());
+    let mut domain_key = None;
     let domain_list = &CONFIG.lock().await.domains;
     for i in domain_list {
         if check_config_value(i.0.to_string(), host.to_string()) {
-            domain_key = i;
+            domain_key = Some(i.1);
             break;
         }
     }
-    if domain_key.1.taget == Domain::default().taget {
-        let mut rt = Response::new(Body::empty());
-        *rt.status_mut() = StatusCode::BAD_GATEWAY;
-        return Ok(rt); 
-    }
-    let plugin_list = &domain_key.1.plugins.clone().unwrap_or(Vec::new());
+    let addr = if domain_key.is_some() {
+        Some(domain_key.unwrap().taget.clone())
+    } else {
+        None
+    };
     let mut cache = HashMap::new();
-    println!("{} -> {}", ipadd, domain_key.1.taget);
-    for i in plugin_list {
-        if PLUGINS.contains_key(i) {
-            let plugin = PLUGINS.get(i).unwrap();
-            (req, cache) = plugin.on_request(req, ipadd.clone(), cache);
-        }
+    let (parts, body) = req.into_parts();
+    let mut req_plugin = RequestPlugin::new(parts, body, addr, cache);
+    let _ = PLUGINS.values().map(|x| x.on_request(&mut req_plugin));
+    let r_addr = req_plugin.get_foword_to();
+    cache = req_plugin.get_cache();
+    let mut req = req_plugin.to_request();
+    if r_addr.is_none() {
+        return Ok(Response::builder().status(StatusCode::NOT_IMPLEMENTED).body(Body::empty()).unwrap());
     }
-    let addr = domain_key.1.taget.clone();
+    let addr = r_addr.unwrap();
     let client_stream = TcpStream::connect(addr).await;
     if client_stream.is_err() {
         let mut rt = Response::new(Body::from("Gateway error"));
@@ -198,6 +198,8 @@ async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Resu
             eprintln!("Error in connection: {}", e);
         }
     });
+    req.headers_mut().remove("x-forwarded-for");
+    req.headers_mut().append("x-forwarded-for", ipadd.parse().unwrap());
     let req_upgraded = req.extensions_mut().remove::<OnUpgrade>();
     let mut ret = sender.send_request(req).await.unwrap();
     let ret_upgraded = ret.extensions_mut().remove::<OnUpgrade>();
@@ -209,14 +211,9 @@ async fn server_upgrade(mut req: Request<Body>, addr_stream: SocketAddr) -> Resu
             let _ = tokio::io::copy_bidirectional(&mut _requp, &mut _retup).await;
         }); 
     }
-    let mut rt = Response::from_parts(parts, body);
-    for i in plugin_list {
-        if PLUGINS.contains_key(i) {
-            let plugin = PLUGINS.get(i).unwrap();
-            (rt, cache) = plugin.on_response(rt, ipadd.clone(), cache);
-        }
-    }
-    return Ok(rt);
+    let mut response_plugin = ResponsePlugin::new(parts, body, cache);
+    let _ = PLUGINS.values().map(|x| x.on_response(&mut response_plugin));
+    return Ok(response_plugin.to_response());
 }
 
 

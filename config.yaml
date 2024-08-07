@@ -27,8 +27,6 @@ bind: localhost:80
 
 regex \d+.example.com: # it will match all example.com subdomains that has only nunber
   taget: localhost:2000
-  plugins:
-    - reverse_proxy_sys_plugin_example
 
 # example
 wc hi-*.example.com: # it will match all example.com subdomains start with "hi-"
