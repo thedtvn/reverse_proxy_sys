@@ -8,7 +8,7 @@
 
 here is a example configuration file [config.yml](https://github.com/thedtvn/reverse_proxy_sys/blob/main/config.yaml)
 
-and plugins directory [plugins](https://github.com/thedtvn/reverse_proxy_sys/tree/main/plugins)
+to add plugins create directory plugins then put a builded plugin in it (.dll on windows, .dylib on mac, .so on linux)
 
 plugin example is in [reverse_proxy_sys_plugin_example](https://github.com/thedtvn/reverse_proxy_sys_plugin_example)
 
