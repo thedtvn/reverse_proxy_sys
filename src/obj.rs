@@ -16,13 +16,14 @@ pub struct Domain {
     pub plugins: Option<Vec<String>>,
 }
 
+#[allow(dead_code)]
 pub struct RequestPlugin {
-    pub parts: RequestParts,
-    pub body: Body,
+    parts: RequestParts,
+    body: Body,
     pub cache: HashMap<String, String>,
     pub foword_to: Option<String>,
 }
-
+#[allow(dead_code)]
 impl RequestPlugin {
     pub fn new(parts: RequestParts, body: Body, foword_to: Option<String>, cache: HashMap<String, String>) -> Self {
         Self {
@@ -44,14 +45,24 @@ impl RequestPlugin {
     pub fn get_cache(&self) -> HashMap<String, String> {
         self.cache.clone()
     }
+
+    pub fn get_parts(&mut self) -> &mut RequestParts {
+        &mut self.parts
+    }
+
+    pub fn get_body(&mut self) -> &mut Body {
+        &mut self.body
+    }
 }
 
+#[allow(dead_code)]
 pub struct ResponsePlugin {
-    pub parts: ResponseParts,
-    pub body: Body,
+    parts: ResponseParts,
+    body: Body,
     pub cache: HashMap<String, String>,
 }
 
+#[allow(dead_code)]
 impl ResponsePlugin {
     pub fn new(parts: ResponseParts, body: Body, cache: HashMap<String, String>) -> Self {
         Self {
@@ -63,5 +74,13 @@ impl ResponsePlugin {
 
     pub fn to_response(self) -> Response<Body> {
         Response::from_parts(self.parts, self.body)
+    }
+
+    pub fn get_parts(&mut self) -> &mut ResponseParts {
+        &mut self.parts
+    }
+
+    pub fn get_body(&mut self) -> &mut Body {
+        &mut self.body
     }
 }

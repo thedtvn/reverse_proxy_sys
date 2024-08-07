@@ -178,7 +178,9 @@ async fn server_upgrade(req: Request<Body>, addr_stream: SocketAddr) -> Result<R
     let mut cache = HashMap::new();
     let (parts, body) = req.into_parts();
     let mut req_plugin = RequestPlugin::new(parts, body, addr, cache);
-    let _ = PLUGINS.values().map(|x| x.on_request(&mut req_plugin));
+    for x in PLUGINS.values() {
+        x.on_request(&mut req_plugin);
+    }
     let r_addr = req_plugin.get_foword_to();
     cache = req_plugin.get_cache();
     let mut req = req_plugin.to_request();
@@ -212,7 +214,9 @@ async fn server_upgrade(req: Request<Body>, addr_stream: SocketAddr) -> Result<R
         }); 
     }
     let mut response_plugin = ResponsePlugin::new(parts, body, cache);
-    let _ = PLUGINS.values().map(|x| x.on_response(&mut response_plugin));
+    for x in PLUGINS.values() {
+        x.on_response(&mut response_plugin);
+    }
     return Ok(response_plugin.to_response());
 }
 
