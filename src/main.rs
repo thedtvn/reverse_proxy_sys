@@ -206,18 +206,19 @@ async fn server_upgrade(req: Request<Body>, addr_stream: SocketAddr) -> Result<R
     let mut ret = sender.send_request(req).await.unwrap();
     let ret_upgraded = ret.extensions_mut().remove::<OnUpgrade>();
     let (parts, body) = ret.into_parts();
-    if parts.status == hyper::StatusCode::SWITCHING_PROTOCOLS {
+    let mut response_plugin = ResponsePlugin::new(parts, body, cache);
+    for x in PLUGINS.values() {
+        x.on_response(&mut response_plugin);
+    }
+    let res = response_plugin.to_response();
+    if res.status() == hyper::StatusCode::SWITCHING_PROTOCOLS {
         tokio::spawn(async move {
             let mut _requp = req_upgraded.unwrap().await.unwrap();
             let mut _retup = ret_upgraded.unwrap().await.unwrap();
             let _ = tokio::io::copy_bidirectional(&mut _requp, &mut _retup).await;
         }); 
     }
-    let mut response_plugin = ResponsePlugin::new(parts, body, cache);
-    for x in PLUGINS.values() {
-        x.on_response(&mut response_plugin);
-    }
-    return Ok(response_plugin.to_response());
+    return Ok(res);
 }
 
 
