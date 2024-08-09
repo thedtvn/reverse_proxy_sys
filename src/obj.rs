@@ -17,6 +17,7 @@ pub struct Domain {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct RequestPlugin {
     parts: RequestParts,
     body: Body,
@@ -56,6 +57,7 @@ impl RequestPlugin {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct ResponsePlugin {
     parts: ResponseParts,
     body: Body,

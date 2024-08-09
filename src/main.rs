@@ -130,7 +130,12 @@ async fn get_ip_address(req: hyper::HeaderMap, addr_stream: SocketAddr) -> Strin
 
 fn load_plugins() -> HashMap<String, Container<Plugin>> {
     let mut plugins = HashMap::new();
-    for file in std::fs::read_dir(&ARGS_CONFIG.plugins_dir).unwrap() {
+    let dir_list_r = std::fs::read_dir(&ARGS_CONFIG.plugins_dir);
+    if dir_list_r.is_err() {
+        eprintln!("Failed to read plugins directory '{}' so no plugins loaded", ARGS_CONFIG.plugins_dir.display());
+        return plugins;
+    }
+    for file in dir_list_r.unwrap() {
         let path = file.unwrap().path();
         let os_name =  std::env::consts::OS;
         let file_extension;
@@ -149,6 +154,7 @@ fn load_plugins() -> HashMap<String, Container<Plugin>> {
             plugins.insert(name, plugin_api_wrapper);
         }
     }
+    println!("Loaded {} plugins", plugins.len());
     return plugins;
 }
 
@@ -177,10 +183,21 @@ async fn server_upgrade(req: Request<Body>, addr_stream: SocketAddr) -> Result<R
     };
     let mut cache = HashMap::new();
     let (parts, body) = req.into_parts();
-    let mut req_plugin = RequestPlugin::new(parts, body, addr, cache);
-    for x in PLUGINS.values() {
-        x.on_request(&mut req_plugin);
+    let req_plugin_r = tokio::task::spawn_blocking(move || {
+        let mut req_plugin = RequestPlugin::new(parts, body, addr, cache);
+        for x in PLUGINS.values() {
+            x.on_request(&mut req_plugin);
+        }
+        req_plugin
+    }).await;
+    if req_plugin_r.is_err() {
+        // just in case runtime error and can not handle plugin panic
+        let mut rt = Response::new(Body::from("Request Plugin error"));
+        *rt.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        println!("Request Plugin error: {}", req_plugin_r.unwrap_err().to_string());
+        return Ok(rt); 
     }
+    let req_plugin = req_plugin_r.unwrap();
     let r_addr = req_plugin.get_foword_to();
     cache = req_plugin.get_cache();
     let mut req = req_plugin.to_request();
@@ -206,10 +223,21 @@ async fn server_upgrade(req: Request<Body>, addr_stream: SocketAddr) -> Result<R
     let mut ret = sender.send_request(req).await.unwrap();
     let ret_upgraded = ret.extensions_mut().remove::<OnUpgrade>();
     let (parts, body) = ret.into_parts();
-    let mut response_plugin = ResponsePlugin::new(parts, body, cache);
-    for x in PLUGINS.values() {
-        x.on_response(&mut response_plugin);
+    let response_plugin_r = tokio::task::spawn_blocking(move || {
+        let mut response_plugin = ResponsePlugin::new(parts, body, cache);
+        for x in PLUGINS.values() {
+            x.on_response(&mut response_plugin);
+        }
+        response_plugin
+    }).await;
+    if response_plugin_r.is_err() {
+        // just in case runtime error and can not handle plugin panic
+        let mut rt = Response::new(Body::from("Response Plugin error"));
+        *rt.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        println!("Response Plugin error: {}", response_plugin_r.unwrap_err().to_string());
+        return Ok(rt);
     }
+    let response_plugin = response_plugin_r.unwrap();
     let res = response_plugin.to_response();
     if res.status() == hyper::StatusCode::SWITCHING_PROTOCOLS {
         tokio::spawn(async move {
@@ -241,9 +269,10 @@ async fn main() {
     make_service_fn(move |conn: &AddrStream|{
         let addr = conn.remote_addr();
          async move {
-             let addr=addr.clone();
-        Ok::<_, Infallible>(service_fn(move |req| server_upgrade(req, addr.clone())))
-    }});
+            let addr = addr.clone();
+            Ok::<_, Infallible>(service_fn(move |req| server_upgrade(req, addr.clone())))
+        }
+    });
 
     let server = Server::bind(&addr).serve(make_service);
 
