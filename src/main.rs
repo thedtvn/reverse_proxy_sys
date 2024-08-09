@@ -38,6 +38,7 @@ struct Args {
 
 #[derive(WrapperApi)]
 struct Plugin {
+    on_init: fn() -> (),
     on_request: fn(request: &mut RequestPlugin) -> (),
     on_response: fn(response: &mut ResponsePlugin) -> ()
 }
@@ -263,6 +264,9 @@ async fn main() {
     let addrs_iter = CONFIG.lock().await.bind.to_socket_addrs();
     if addrs_iter.is_err() {
         panic!("{}", addrs_iter.unwrap_err());
+    }
+    for x in PLUGINS.values() {
+        x.on_init();
     }
     let addr = addrs_iter.unwrap().next().unwrap();
     let make_service =
